@@ -2,8 +2,10 @@ import React, { useEffect, useState, useRef } from "react";
 import AdminPresenter from "./AdminPresenter"
 import { useMutation } from "react-apollo-hooks";
 import { LOG_OUT } from "../Mypage/MyPageQueries";
-import { storage } from "../../Firebase";
+import { supabase } from "../../Supabase";
+import { supabaseProducts } from "../../Supabase/products";
 import { UPLOAD, EDIT_SEE_PRODUCT, DELETE_PRODUCT, EDIT_PRODUCT } from "./AdminQueries";
+import { toast } from "react-toastify";
 
 export default () => {
     // Admin창의 tab메뉴 
@@ -72,37 +74,58 @@ export default () => {
     });
 
     const uploadFunction = async () => {
-        const { data } = await uploadMutation();
-        if (data) {
-            // state 초기화
-            setName("");
-            setPrice(0);
-            setMainCategory("");
-            setSubCategory("");
-            setFileUrl([]);
-            setFile("");
-            setColor([]);
-            setSize([]);
-            setStock([]);
+        try {
+            // Supabase API를 사용하여 상품 등록
+            const productData = {
+                name,
+                price: parseInt(price),
+                mainCategory,
+                subCategory,
+                fileUrls: fileUrl,
+                colors: color,
+                sizes: size,
+                stocks: stock.map(s => parseInt(s))
+            };
             
-            alert("업로드가 완료되었습니다");
+            const { success, productId, error } = await supabaseProducts.createProduct(productData);
             
-            // Form 입력값 초기화 
-            let colorClass = document.getElementsByClassName("color");
-            let sizeClass = document.getElementsByClassName("size");
-            let stockClass = document.getElementsByClassName("stock");
+            if (success) {
+                // state 초기화
+                setName("");
+                setPrice(0);
+                setMainCategory("");
+                setSubCategory("");
+                setFileUrl([]);
+                setFile("");
+                setColor([]);
+                setSize([]);
+                setStock([]);
+                
+                toast.success("상품이 성공적으로 등록되었습니다");
+                
+                // Form 입력값 초기화 
+                let colorClass = document.getElementsByClassName("color");
+                let sizeClass = document.getElementsByClassName("size");
+                let stockClass = document.getElementsByClassName("stock");
 
-            document.getElementById("Name").value = "";
-            document.getElementById("Price").value = "";
-            previewImg.current.src = "https://www.namdokorea.com/site/jeonnam/tour/images/noimage.gif";
-            document.getElementById("mainCategorySelect").value  = "0";
-            document.getElementById("subCategorySelect").value = "0";
+                document.getElementById("Name").value = "";
+                document.getElementById("Price").value = "";
+                previewImg.current.src = "https://www.namdokorea.com/site/jeonnam/tour/images/noimage.gif";
+                document.getElementById("mainCategorySelect").value  = "0";
+                document.getElementById("subCategorySelect").value = "0";
 
-            for (let i = 0; i < colorClass.length; i++) {
-                colorClass[i].value = "";
-                sizeClass[i].value = "";
-                stockClass[i].value = "";
+                for (let i = 0; i < colorClass.length; i++) {
+                    colorClass[i].value = "";
+                    sizeClass[i].value = "";
+                    stockClass[i].value = "";
+                }
+            } else {
+                toast.error("상품 등록에 실패했습니다");
+                console.error("상품 등록 오류:", error);
             }
+        } catch (error) {
+            toast.error("상품 등록에 실패했습니다");
+            console.error("상품 등록 오류:", error);
         }
     }
 
@@ -191,19 +214,19 @@ export default () => {
 
         // 값 검사 
         if (nameValue === "" || nameValue === null || nameValue === undefined) {
-            alert("상품명을 입력해주세요");
+            toast.error("상품명을 입력해주세요");
             return false;
         } else if (priceValue === "" || priceValue === null || priceValue === undefined) {
-            alert("상품 가격을 입력해주세요");
+            toast.error("상품 가격을 입력해주세요");
             return false;
         } else if (mainCategory === "" || mainCategory === 0) {
-            alert("대분류를 선택해주세요");
+            toast.error("대분류를 선택해주세요");
             return false;
         } else if (subCategory === "" || subCategory === 0) {
-            alert("소분류를 선택해주세요");
+            toast.error("소분류를 선택해주세요");
             return false;
         } else if (file === "") {
-            alert("상품 이미지를 선택해주세요");
+            toast.error("상품 이미지를 선택해주세요");
             return false;
         } else {
             setName(nameValue);
@@ -212,7 +235,7 @@ export default () => {
             for (let i = 0; i < colorClass.length; i++) {
                 if (colorClass[i].value !== "") {
                     if (sizeClass[i].value === "" || stockClass.value === "") {
-                        alert("색상, 사이즈, 재고량의 입력 개수가 같아야 합니다.");
+                        toast.error("색상, 사이즈, 재고량의 입력 개수가 같아야 합니다.");
                         return false;
                     } else {
                         // 값이 들어 있는 행의 값들을 각각의 배열에 push한다. 
@@ -225,7 +248,7 @@ export default () => {
             }
 
             if (colorArray.length === 0 || sizeArray.length === 0 || stockArray.length === 0) {
-                alert("옵션 값을 입력해주세요");
+                toast.error("옵션 값을 입력해주세요");
                 return false;
             } else {
                 setColor(colorArray);
@@ -238,52 +261,56 @@ export default () => {
             if (editData2 !== undefined) {
                 if (file !== editData2.seeProductAll[0].files[0].url) {
                     // 파일 업로드 
-                    const uploadTask = await storage.ref(`images/${file.name}`).put(file);
-                    await uploadTask.task.on('state_changed',
-                        snapshot => {
-                            // progress function 
-                            const progress = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
-                            console.log(progress);
-                        },
-                        error => {
-                            console.log(error);
-                        },
-                        async () => {
-                            // complete function
-                            await uploadTask.task.snapshot.ref.getDownloadURL()
-                            .then(url => {
-                                let urlArray = [];
-                                urlArray.push(url);
-                                setFileUrl(urlArray);
-                                setIsEdit(true); // 수정임을 구분하기 위해서 
-                            })
+                    try {
+                        const { data, error } = await supabase.storage
+                            .from('images')
+                            .upload(`public/${file.name}`, file);
+                        
+                        if (error) {
+                            console.error('업로드 오류:', error);
+                            return;
                         }
-                    )
+                        
+                        // 업로드된 파일의 공개 URL 가져오기
+                        const { data: urlData } = supabase
+                            .storage
+                            .from('images')
+                            .getPublicUrl(`public/${file.name}`);
+                        
+                        let urlArray = [];
+                        urlArray.push(urlData.publicUrl);
+                        setFileUrl(urlArray);
+                        setIsEdit(true); // 수정임을 구분하기 위해서
+                    } catch (error) {
+                        console.error('파일 업로드 오류:', error);
+                    }
                 } else {
                     setIsEdit(true);
                 }
             } else {
                 // 파일 업로드 
-                const uploadTask = await storage.ref(`images/${file.name}`).put(file);
-                await uploadTask.task.on('state_changed',
-                    snapshot => {
-                        // progress function 
-                        const progress = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
-                        console.log(progress);
-                    },
-                    error => {
-                        console.log(error);
-                    },
-                    async () => {
-                        // complete function
-                        await uploadTask.task.snapshot.ref.getDownloadURL()
-                        .then(url => {
-                            let urlArray = [];
-                            urlArray.push(url);
-                            setFileUrl(urlArray);
-                        })
+                try {
+                    const { data, error } = await supabase.storage
+                        .from('images')
+                        .upload(`public/${file.name}`, file);
+                    
+                    if (error) {
+                        console.error('업로드 오류:', error);
+                        return;
                     }
-                )
+                    
+                    // 업로드된 파일의 공개 URL 가져오기
+                    const { data: urlData } = supabase
+                        .storage
+                        .from('images')
+                        .getPublicUrl(`public/${file.name}`);
+                    
+                    let urlArray = [];
+                    urlArray.push(urlData.publicUrl);
+                    setFileUrl(urlArray);
+                } catch (error) {
+                    console.error('파일 업로드 오류:', error);
+                }
             }
         }
     }
@@ -291,7 +318,7 @@ export default () => {
     // 파일에 대한 처리가 가장 늦으므로 fileUrl에 값이 들어오면 uploadFunction을 실행시킴 
     // file이 아니라 다른값을 하게 되면 fileUrl 에 값이 들어오기도 전에 upload가 실행되서 파일에 대한 값이 들어가지 못함 
     useEffect(() => {
-        if (editData2 === undefined && name !== "" && price !== "" && fileUrl.length !== 0 && color.lnegth !== 0) {
+        if (editData2 === undefined && name !== "" && price !== "" && fileUrl.length !== 0 && color.length !== 0) {
             uploadFunction();
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -312,9 +339,27 @@ export default () => {
     });
 
     const seeProductFunction = async () => {
-        const { data } = await seeProductMutation();
-        if (data) {
-            setEditData(data);
+        try {
+            // Supabase API를 사용하여 상품 목록 조회
+            const products = await supabaseProducts.getProducts({ sort: 'created_at' });
+            
+            if (products) {
+                // 기존 GraphQL 응답 형식과 호환되도록 데이터 형식 변환
+                const formattedData = {
+                    seeProductAll: products.map(product => ({
+                        ...product,
+                        mainCategory: product.main_category,
+                        subCategory: product.sub_category
+                    }))
+                };
+                
+                setEditData({ seeProductAll: formattedData.seeProductAll });
+            } else {
+                toast.error("상품 목록을 불러오는데 실패했습니다.");
+            }
+        } catch (error) {
+            console.error("상품 목록 조회 오류:", error);
+            toast.error("상품 목록을 불러오는데 실패했습니다.");
         }
     }
 
@@ -427,40 +472,52 @@ export default () => {
     }
 
     const editFunction = async() => {
-        const { data } = await editMutation({variables: {
-            id:editData2.seeProductAll[0].id,
-            name,
-            price,
-            mainCategory, 
-            subCategory,
-            fileId: editData2.seeProductAll[0].files[0].id, 
-            file: fileUrl, 
-            sizeId, 
-            sizeValue: size, 
-            colorId, 
-            colorValue: color, 
-            stockId, 
-            stockValue: stock,
-            productId: editData2.seeProductAll[0].id
-        }});
-        if(data) {
-            setName("");
-            setPrice(0);
-            setMainCategory("");
-            setSubCategory("");
-            setFileUrl([]);
-            setFile("");
-            setColor([]);
-            setSize([]);
-            setStock([]);
-            setEditData2();
-            setIsEdit(false);
-            setSizeId([]);
-            setColorId([]);
-            setStockId([]);
+        try {
+            // Supabase API를 사용하여 상품 수정
+            const productData = {
+                id: editData2.seeProductAll[0].id,
+                name,
+                price: parseInt(price),
+                mainCategory, 
+                subCategory,
+                fileId: editData2.seeProductAll[0].files[0].id, 
+                fileUrls: fileUrl, 
+                sizeIds: sizeId, 
+                sizeValues: size, 
+                colorIds: colorId, 
+                colorValues: color, 
+                stockIds: stockId, 
+                stockValues: stock.map(s => parseInt(s))
+            };
+            
+            const { success, error } = await supabaseProducts.updateProduct(productData);
+            
+            if (success) {
+                setName("");
+                setPrice(0);
+                setMainCategory("");
+                setSubCategory("");
+                setFileUrl([]);
+                setFile("");
+                setColor([]);
+                setSize([]);
+                setStock([]);
+                setEditData2();
+                setIsEdit(false);
+                setSizeId([]);
+                setColorId([]);
+                setStockId([]);
 
-            seeProductFunction(); // 모든 값을 초기화 시켜줬으면 다시 전체상품 보여주는 Mutation을 실행시킴으로써 변경값을 업데이트 시켜준다. 
-            document.getElementById("modal").style.display = "none";
+                toast.success("상품이 성공적으로 수정되었습니다");
+                seeProductFunction(); // 모든 값을 초기화 시켜줬으면 다시 전체상품 보여주는 함수를 실행시켜 변경값을 업데이트
+                document.getElementById("modal").style.display = "none";
+            } else {
+                toast.error("상품 수정에 실패했습니다");
+                console.error("상품 수정 오류:", error);
+            }
+        } catch (error) {
+            toast.error("상품 수정에 실패했습니다");
+            console.error("상품 수정 오류:", error);
         }
     }
 
@@ -478,22 +535,25 @@ export default () => {
 
     ////////////////////////////////////// 상품 삭제 ////////////////////////////////////////////////////////////////
 
-    const deleteProductMutation = useMutation(DELETE_PRODUCT);
-
     const deleteClick = async (id) => {
         let result = window.confirm("해당 상품을 삭제하시겠습니까?");
 
         if (result) {
-            const { data } = await deleteProductMutation({
-                variables: {
-                    id: id
+            try {
+                // Supabase API를 사용하여 상품 삭제
+                const isDeleted = await supabaseProducts.deleteProduct(id);
+                
+                if (isDeleted) {
+                    // 삭제 성공 시 목록 새로고침
+                    seeProductFunction();
+                    toast.success("상품이 성공적으로 삭제되었습니다.");
+                } else {
+                    toast.error("상품 삭제 중 오류가 발생했습니다.");
                 }
-            });
-            if (data) {
-                seeProductFunction();
+            } catch (error) {
+                console.error("상품 삭제 오류:", error);
+                toast.error("상품 삭제 중 오류가 발생했습니다.");
             }
-        } else {
-
         }
     }
 
@@ -522,41 +582,3 @@ export default () => {
         />
     )
 }
-
-
-
-
-
-
-
-
-
-    
-
-
-
-
-
-    
-
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
- 
-

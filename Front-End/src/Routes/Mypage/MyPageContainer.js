@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from "react";
 import MyPagePresenter from "./MyPagePresenter";
-import { useQuery, useMutation } from "react-apollo-hooks";
-import { ME } from './../../Components/SharedQueries';
 import useInput from "../../Hooks/useInput";
-import { EDIT_PROFILE, SEE_CART, DELETE_CART, SEE_BUYLIST, BUYLIST_QUERY, LOG_OUT } from './MyPageQueries';
 import { toast } from "react-toastify";
-import { ADD_PAYMENT } from './../Product/ProductQueries';
+import { supabaseCart, supabaseBuyList } from "../../Supabase/cart";
+import { supabaseProfile } from "../../Supabase/profile";
 
 export default ({history}) => {
     // tab
@@ -20,6 +18,9 @@ export default ({history}) => {
     const [count, setCount] = useState([]);
     const [totalarr, setTotalarr] = useState([]);
     const [total, setTotal] = useState(0);
+    const [cartLoading, setCartLoading] = useState(true);
+    const [cartData, setCartData] = useState({ seeCart: [] });
+    
     // 총 합계를 구하기 위한 식 (array.reduce에서 사용됨)
     const totalFunc = (a, b) => a + b;
 
@@ -30,74 +31,52 @@ export default ({history}) => {
     let countArray = [];
     let cartArray = []; 
 
-    const { loading: cartLoading, data: cartData, refetch } = useQuery(SEE_CART, {fetchPolicy: "network-only", fetchResults: true});
-
-    const deleteCartMutation = useMutation(DELETE_CART, {
-        variables: {
-            id: cartId
-        }
-    });
-
-    const addPaymentMutation = useMutation(ADD_PAYMENT, {
-        variables: {
-            product: productArray,
-            size: sizeIdArray,
-            color: colorIdArray,
-            stock: stockIdArray,
-            count: countArray, 
-            cart: cartArray
-        }
-    })
-
-    useEffect(() => {
-        const countTemp = [];
-        const totalarrTemp = [];
-        const totalTemp = [];
-        if (cartLoading === false) {
-            cartData.seeCart.map(item => (
-                item.count.map(cnt => (
-                    countTemp.push(cnt.count)
-                ))
-            ));
-            setCount([...countTemp]);
-            cartData.seeCart.map(item => (
-                item.product.map(product => (
-                    totalarrTemp.push(product.price)
-                ))
-            ));
-            setTotalarr([...totalarrTemp]);
-            countTemp.map((count, index) => (
-                totalTemp.push(count * totalarrTemp[index])
-            ));
-            if(totalTemp.length === 0) {
-                setTotal(0);
-            } else {
-                setTotal(totalTemp.reduce(totalFunc));
+    // 장바구니 데이터 가져오기
+    const fetchCartData = async () => {
+        setCartLoading(true);
+        try {
+            const data = await supabaseCart.getCart();
+            setCartData(data);
+            
+            // 초기 count 배열 설정
+            if (data && data.seeCart) {
+                const initialCounts = data.seeCart.map(item => item.count[0].count);
+                setCount(initialCounts);
             }
-            //
+        } catch (error) {
+            console.error('장바구니 로드 오류:', error);
+            toast.error('장바구니를 불러오는데 실패했습니다.');
+        } finally {
+            setCartLoading(false);
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [cartLoading, cartData])
+    };
 
-    const cartCountUp = (i) => {
-        count.splice(i, 1, count[i] + 1);
-        setCount([...count]);
-    }
-
-    const cartCountDown = (i) => {
-        if (count[i] > 1) {
-            count.splice(i, 1, count[i] - 1);
-            setCount([...count]);
-        }
-    }
-
+    // 컴포넌트 마운트 시 장바구니 조회
     useEffect(() => {
-        if (cartLoading === false) {
+        fetchCartData();
+    }, []);
+
+    // 장바구니 수량 증가
+    const cartCountUp = (i) => {
+        const countTemp = [...count];
+        countTemp[i] = countTemp[i] + 1;
+        setCount(countTemp);
+    }
+
+    // 장바구니 수량 감소
+    const cartCountDown = (i) => {
+        const countTemp = [...count];
+        if (countTemp[i] > 1) {
+            countTemp[i] = countTemp[i] - 1;
+            setCount(countTemp);
+        }
+    }
+
+    // 수량 변경에 따른 총액 계산
+    useEffect(() => {
+        if (cartLoading === false && cartData.seeCart.length > 0) {
             const totalarrTemp = [];
-            const countTemp = [];
-            count.map((item) => (
-                countTemp.push(item)
-            ));
+            const countTemp = [...count];
 
             cartData.seeCart.map((item, index) => (
                 item.product.map(product => (
@@ -109,8 +88,8 @@ export default ({history}) => {
                 setTotal(totalarrTemp.reduce(totalFunc));
             }
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [count])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [count, cartData])
 
     // 장바구니에서 상품을 삭제하기 위해 생성
     // => 클릭한 상품의 Id 값을 받아와서 cartId에 set해줌 
@@ -121,18 +100,26 @@ export default ({history}) => {
     // passcartId함수가 실행되면 cartId의 값이 setting 되고 해당 hook(useEffect)이 실행됨 
     useEffect(() => {
         const deleteCartFunc = async () => {
-            const { data } = await deleteCartMutation();
-            if (data) {
-                refetch();
+            try {
+                const result = await supabaseCart.deleteCart(cartId);
+                if (result) {
+                    fetchCartData();
+                    toast.success('상품이 장바구니에서 삭제되었습니다.');
+                }
+            } catch (error) {
+                console.error('장바구니 삭제 오류:', error);
+                toast.error('장바구니에서 상품을 삭제하는데 실패했습니다.');
             }
         }
+        
         if (cartId !== "") {
             deleteCartFunc();
             setCartId("");
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [cartId])
 
+    // 전체 선택/해제
     const allCheck = (checked) => {
         if (checked) {
             if (cartLoading === false) {
@@ -153,86 +140,103 @@ export default ({history}) => {
 
     let isChecked = false; 
 
+    // 장바구니에서 선택한 상품 주문하기
     const selectOrder = async () => {
-        cartData.seeCart.map(async (item, index) => {
-            const chkBox = document.getElementById(item.id);
-            if (chkBox.checked === true) {
-                isChecked = true;
-                return (
-                    productArray.push(item.product[0].id),
-                    sizeIdArray.push(item.sizeId[0].id),
-                    colorIdArray.push(item.colorId[0].id),
-                    stockIdArray.push(item.stockId[0].id), 
-                    countArray.push(count[index]), 
-                    cartArray.push(item.id)
-                )
+        try {
+            cartData.seeCart.map(async (item, index) => {
+                const chkBox = document.getElementById(item.id);
+                if (chkBox.checked === true) {
+                    isChecked = true;
+                    return (
+                        productArray.push(item.product[0].id),
+                        sizeIdArray.push(item.sizeId[0].id),
+                        colorIdArray.push(item.colorId[0].id),
+                        stockIdArray.push(item.stockId[0].id), 
+                        countArray.push(count[index]), 
+                        cartArray.push(item.id)
+                    )
+                }
+                return null;
+            });
+            
+            if(isChecked) {
+                const result = await supabaseCart.addPayment({
+                    product: productArray,
+                    size: sizeIdArray,
+                    color: colorIdArray,
+                    stock: stockIdArray,
+                    count: countArray,
+                    cart: cartArray
+                });
+                
+                if(result) {
+                    productArray = []; 
+                    sizeIdArray = [];
+                    colorIdArray = [];
+                    stockIdArray = [];
+                    countArray = [];
+                    cartArray = [];
+                    toast.success('주문이 완료되었습니다.');
+                    setTimeout(() => history.push('/payment'), 1000);
+                }
             }
-        })
-        if(isChecked) {
-            const { data } = await addPaymentMutation(); 
-            if(data) {
-                productArray = []; 
-                sizeIdArray = [];
-                colorIdArray = [];
-                stockIdArray = [];
-                countArray = [];
-                cartArray = [];
-                setTimeout(() => history.push('/payment'), 1000);
+            
+            if(isChecked === false) {
+                toast.warning("주문할 상품을 선택하여 주세요");
             }
-        }
-        if(isChecked === false) {
-            alert("주문할 상품을 선택하여 주세요");
+        } catch (error) {
+            console.error('주문 처리 오류:', error);
+            toast.error('주문 처리 중 오류가 발생했습니다.');
         }
     }
 
-
-
     // 구매 목록 
-    const [buyData, setBuyData] = useState("");
+    const [buyData, setBuyData] = useState({ seeBuyList2: [] });
+    const [buyListData, setBuyListData] = useState({ seeBuyList: [] });
+    const [buyListLoading, setBuyListLoading] = useState(true);
+    
     // 페이징을 위한 초기 first, skip 값 
     const first = 1;
     const [skip, setSkip] = useState(0);
-    const [page, setPage] = useState();
+    const [page, setPage] = useState(0);
     const [totalPage, setTotalpage] = useState(0);
 
-    const { loading: buyListLoading, data: BuyListData } = useQuery(BUYLIST_QUERY);
-
-    const seeBuyListMutation = useMutation(SEE_BUYLIST, {
-        variables: {
-            first,
-            skip
-        }
-    });
-
+    // 페이지 변경
     const changePage = (value) => {
         setPage(value - 1);
         setSkip((value - 1) * first);
     }
-
-    // page의 값이 바뀔때마다 구매목록 페이지를 가져온다. 
-    // page 값은 changePage 함수가 실행 된 후 바뀌게 되며, 
-    // changePage 함수에서 skip의 값이 바뀌고 그 후에 seeBuyListFunc()이 실행되기 때문에 
-    // 페이징 효과를 가져올 수 있음 
-    useEffect(() => {
-        seeBuyListFunc();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [page])
-
-    const seeBuyListFunc = async () => {
-        const { data } = await seeBuyListMutation();
-        setBuyData(data);
-    }
-
-
-    useEffect(() => {
-        if (tab === "buyList") {
-            seeBuyListFunc();
-            if (buyListLoading === false) {
-                setTotalpage(Math.ceil(BuyListData.seeBuyList.length / first));
+    
+    // 구매 목록 조회
+    const fetchBuyList = async () => {
+        try {
+            setBuyListLoading(true);
+            // 전체 구매 목록 수 조회
+            const totalData = await supabaseBuyList.getTotalBuyList();
+            setBuyListData(totalData);
+            
+            if (totalData && totalData.seeBuyList) {
+                setTotalpage(Math.ceil(totalData.seeBuyList.length / first));
             }
+            
+            // 페이지별 구매 목록 조회
+            const pageData = await supabaseBuyList.getBuyList(first, skip);
+            setBuyData(pageData);
+        } catch (error) {
+            console.error('구매 목록 조회 오류:', error);
+            toast.error('구매 목록을 불러오는데 실패했습니다.');
+        } finally {
+            setBuyListLoading(false);
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [tab])
+    };
+
+    // 페이지 변경 시 구매 목록 조회
+    useEffect(() => {
+        if (tab === 'buyList') {
+            fetchBuyList();
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [page, tab])
 
 
     // 개인정보 수정 
@@ -247,46 +251,44 @@ export default ({history}) => {
     const phone2 = useInput("");
     const phone3 = useInput("");
     const [open, setOpen] = useState(false);
+    
     // 개인정보를 변경한후 변경정보를 얻어오기 위한 delay 
     const [delay, setDelay] = useState(false);
+    const [userData, setUserData] = useState({ me: null });
+    const [userLoading, setUserLoading] = useState(true);
 
-    // 자신의 정보를 가져오는 query 
-    const { loading, data } = useQuery(ME, {
-        fetchPolicy: "no-cache"
-    });
-
-    const editProfileMutation = useMutation(EDIT_PROFILE, {
-        variables: {
-            name: name.value,
-            zipCode: zipCode.value,
-            address: address.value,
-            addressDetail: addressDetail.value,
-            phone: phone1.value + "-" + phone2.value + "-" + phone3.value,
-            password: password.value,
-            confirmPassword: confirmPassword.value
+    // 사용자 프로필 정보 조회
+    const fetchUserProfile = async () => {
+        try {
+            setUserLoading(true);
+            const data = await supabaseProfile.getMyProfile();
+            setUserData(data);
+            
+            if (data && data.me) {
+                const fullPhone = data.me.phone.split("-");
+                name.setValue(data.me.name);
+                email.setValue(data.me.email);
+                zipCode.setValue(data.me.zipCode);
+                address.setValue(data.me.address);
+                addressDetail.setValue(data.me.addressDetail);
+                phone1.setValue(fullPhone[0]);
+                phone2.setValue(fullPhone[1]);
+                phone3.setValue(fullPhone[2]);
+            }
+        } catch (error) {
+            console.error('사용자 프로필 조회 오류:', error);
+        } finally {
+            setUserLoading(false);
         }
-    });
+    };
 
-    // loading과 delay 값이 바뀔 때마다 실행됨 
-    // 개인정보 수정에서 기존의 정보를 미리 setting 해 두기 위한 코드 
-    // delay가 있는 이유는 정보를 성공적으로 수정한 직후에 
-    // Form의 input에 있는 값들을 수정된 정보로 보여주기 위함 
+    // 컴포넌트 마운트 시 사용자 정보 조회
     useEffect(() => {
-        if (loading === false && delay) {
-            const fullPhone = data.me.phone.split("-");
-            name.setValue(data.me.name);
-            email.setValue(data.me.email);
-            zipCode.setValue(data.me.zipCode);
-            address.setValue(data.me.address);
-            addressDetail.setValue(data.me.addressDetail);
-            phone1.setValue(fullPhone[0]);
-            phone2.setValue(fullPhone[1]);
-            phone3.setValue(fullPhone[2]);
-            setDelay(false)
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [loading, delay])
+        fetchUserProfile();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
+    // 주소 검색 결과 처리
     const handleAddress = (data) => {
         let fullAddress = data.address;
         let extraAddress = '';
@@ -300,64 +302,96 @@ export default ({history}) => {
             }
             fullAddress += (extraAddress !== '' ? ` (${extraAddress})` : '');
         }
+
         zipCode.setValue(data.zonecode);
         address.setValue(fullAddress);
-        addressDetail.setValue("");
+        setOpen(false);
     }
 
+    // 개인정보 수정 처리
     const onSubmit = async e => {
         e.preventDefault();
 
         if (
-            name.value !== "" &&
-            zipCode.value !== "" &&
-            address.value !== "" &&
-            addressDetail.value !== "" &&
-            phone1.value !== "" &&
-            phone2.value !== "" &&
-            phone3.value !== ""
+            name.value === "" ||
+            zipCode.value === "" ||
+            address.value === "" ||
+            addressDetail.value === "" ||
+            phone1.value === "" ||
+            phone2.value === "" ||
+            phone3.value === ""
         ) {
-            if (password !== "") {
-                if (password.value !== confirmPassword.value) {
-                    toast.error("비밀번호가 일치하지 않습니다.");
-                    return false;
-                }
-            }
+            toast.error("필수항목을 모두 입력하셔야 합니다.");
+            return;
+        }
 
-            try {
-                const { data: edit } = await editProfileMutation();
-                if (edit) {
-                    toast.success("개인정보가 성공적으로 수정되었습니다!");
-                }
-            } catch (e) {
-                toast.error(e.message);
+        if (password.value !== "" || confirmPassword.value !== "") {
+            if (password.value !== confirmPassword.value) {
+                toast.error("비밀번호가 일치하지 않습니다");
+                return;
             }
+        }
+
+        try {
+            const result = await supabaseProfile.updateProfile({
+                name: name.value,
+                zipCode: zipCode.value,
+                address: address.value,
+                addressDetail: addressDetail.value,
+                phone: phone1.value + "-" + phone2.value + "-" + phone3.value,
+                password: password.value,
+                confirmPassword: confirmPassword.value
+            });
+            
+            if (result) {
+                toast.success("회원정보가 수정되었습니다");
+                // 비밀번호 입력값 초기화
+                password.setValue("");
+                confirmPassword.setValue("");
+                
+                setDelay(true);
+                // 업데이트된 사용자 정보 다시 조회
+                fetchUserProfile();
+            }
+        } catch (error) {
+            console.error('프로필 수정 오류:', error);
+            toast.error("회원정보 수정에 실패했습니다");
         }
     }
 
-    useEffect(() => {
-        setTimeout(() => {
-            setDelay(true);
-        }, 500);
-    }, [data])
-
-    // 로그아웃 
-    const logOut = useMutation(LOG_OUT);
+    // 로그아웃 처리
+    const logOut = async () => {
+        try {
+            const result = await supabaseProfile.signOut();
+            if (result) {
+                toast.success("로그아웃 되었습니다");
+                setTimeout(() => history.push('/'), 1000);
+            }
+        } catch (error) {
+            console.error('로그아웃 오류:', error);
+            toast.error("로그아웃에 실패했습니다");
+        }
+    };
 
     return (
-        <MyPagePresenter
+        <MyPagePresenter 
             tab={tab}
             clickTab={clickTab}
-            cartLoading={cartLoading}
             cartData={cartData}
-            passCartId={passCartId}
-            allCheck={allCheck}
-            total={total}
+            cartLoading={cartLoading}
+            count={count}
             cartCountUp={cartCountUp}
             cartCountDown={cartCountDown}
-            count={count}
+            totalarr={totalarr}
+            total={total}
+            passCartId={passCartId}
+            allCheck={allCheck}
             selectOrder={selectOrder}
-            onSubmit={onSubmit}
+            buyData={buyData}
+            totalPage={totalPage}
+            page={page}
+            changePage={changePage}
+            buyListLoading={buyListLoading}
             name={name}
             email={email}
             password={password}
@@ -365,20 +399,16 @@ export default ({history}) => {
             zipCode={zipCode}
             address={address}
             addressDetail={addressDetail}
-            phone1={phone1.setValue}
+            phone1={phone1}
             phone2={phone2}
             phone3={phone3}
             open={open}
             setOpen={setOpen}
             handleAddress={handleAddress}
-            data={data}
-            buyData={buyData}
-            BuyListData={BuyListData}
-            pageNum={totalPage}
-            buyListLoading={buyListLoading}
-            changePage={changePage}
+            onSubmit={onSubmit}
+            userData={userData}
+            userLoading={userLoading}
             logOut={logOut}
-            totalarr={totalarr}
         />
     )
 }

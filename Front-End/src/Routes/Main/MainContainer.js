@@ -1,7 +1,6 @@
-import React from "react"; 
+import React, { useEffect, useState } from "react"; 
 import MainPresenter from "./MainPresenter";
-import { MAIN_SEEITEM } from './MainQueries';
-import { useQuery } from 'react-apollo-hooks';
+import { supabaseProducts } from '../../Supabase/products';
 
 export default () => {
     const settings = {
@@ -65,19 +64,42 @@ export default () => {
         ]
     }
 
-    // 베스트 아이템 
-    const { data: bestData, loading: bestLoading } = useQuery(MAIN_SEEITEM, {
-        variables: {
-            sort: "best"
-        }
-    });
-    // 최신 아이템 
-    const { data: newData, loading: newLoading } = useQuery(MAIN_SEEITEM, {
-        variables: {
-            sort: "new"
-        }
-    });
+    // 상태 관리
+    const [bestData, setBestData] = useState(null);
+    const [newData, setNewData] = useState(null);
+    const [bestLoading, setBestLoading] = useState(true);
+    const [newLoading, setNewLoading] = useState(true);
 
+    // 데이터 로드 함수
+    const loadBestItems = async () => {
+        setBestLoading(true);
+        try {
+            const data = await supabaseProducts.getMainProducts('best');
+            setBestData(data);
+        } catch (error) {
+            console.error('베스트 상품 로드 오류:', error);
+        } finally {
+            setBestLoading(false);
+        }
+    };
+
+    const loadNewItems = async () => {
+        setNewLoading(true);
+        try {
+            const data = await supabaseProducts.getMainProducts('new');
+            setNewData(data);
+        } catch (error) {
+            console.error('신상품 로드 오류:', error);
+        } finally {
+            setNewLoading(false);
+        }
+    };
+
+    // 컴포넌트 마운트 시 데이터 로드
+    useEffect(() => {
+        loadBestItems();
+        loadNewItems();
+    }, []);
 
     const testData = [
         {
